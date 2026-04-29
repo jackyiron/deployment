@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
       - name: portfolio-container
-        image: asia-east1-docker.pkg.dev/gcp-gke-deploy/gke-images/portfolio:v2
+        image: asia-east1-docker.pkg.dev/gcp-gke-deploy/gke-images/portfolio:prod
         # --- 關鍵修正：確保固定標籤也能正確觸發重新拉取 ---
         imagePullPolicy: Always 
         ports:
