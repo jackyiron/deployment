@@ -1,18 +1,13 @@
-# --- 0. 建立 Namespace ---
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: nginx-frontend
-  labels:
-    # 重要：這會讓 Istio 控制平面自動為該命名空間下的 Pod 注入 Sidecar (Envoy)
-    istio-injection: enabled 
----
 # --- 1. 部署程式碼 (Deployment) ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: portfolio-app
   namespace: nginx-frontend
+  annotations:
+    # 這是給 Image Updater 看的：告訴它「我是由 ArgoCD 託管的」
+    # 它會自動尋找關聯的 Application 並在發現新鏡像時更新此處
+    argocd-image-updater.argoproj.io/on-update: "refresh" 
 spec:
   replicas: 2
   selector:
@@ -23,20 +18,18 @@ spec:
       labels:
         app: portfolio
       annotations:
-        # 強制注入 Sidecar（即便 Namespace 已標記，這也是 SRE 的雙重保險做法）
         sidecar.istio.io/inject: "true"
-        # 全鏈路追蹤配置：100.0 代表 100% 採樣
         proxy.istio.io/config: |
           tracing:
             sampling: 100.0
     spec:
       containers:
       - name: portfolio-container
-        # 使用您剛剛推送到 GCP Artifact Registry 的 v2 鏡像
-        image: asia-east1-docker.pkg.dev/gcp-gke-deploy/gke-images/portfolio:v3
+        image: asia-east1-docker.pkg.dev/gcp-gke-deploy/gke-images/portfolio:v2
+        # --- 關鍵修正：確保固定標籤也能正確觸發重新拉取 ---
+        imagePullPolicy: Always 
         ports:
         - containerPort: 80
-        # SRE 建議：加入資源限制，避免單一 Pod 消耗過多節點資源
         resources:
           requests:
             cpu: "100m"
@@ -44,37 +37,3 @@ spec:
           limits:
             cpu: "200m"
             memory: "256Mi"
----
-# --- 2. 內部服務 (Service) ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: portfolio-service
-  namespace: nginx-frontend
-spec:
-  selector:
-    app: portfolio
-  ports:
-  - name: http # Istio 依賴此命名來識別協議（http/http2/grpc）
-    protocol: TCP
-    port: 80
-    targetPort: 80
----
-# --- 3. 虛擬服務 (VirtualService) ---
-apiVersion: networking.istio.io/v1alpha3
-kind: VirtualService
-metadata:
-  name: portfolio-virtualservice
-  namespace: nginx-frontend
-spec:
-  hosts:
-  - "www.jacky3.com"
-  gateways:
-  - istio-system/monitoring-gateway # 引用位於中央管理命名空間的 Gateway
-  http:
-  - route:
-    - destination:
-        # 跨 Namespace 路由時，使用完整 FQDN (Fully Qualified Domain Name) 最為穩健
-        host: portfolio-service.nginx-frontend.svc.cluster.local
-        port:
-          number: 80
