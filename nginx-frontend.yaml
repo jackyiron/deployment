@@ -33,7 +33,7 @@ spec:
       containers:
       - name: portfolio-container
         # 使用您剛剛推送到 GCP Artifact Registry 的 v2 鏡像
-        image: asia-east1-docker.pkg.dev/gcp-gke-deploy/gke-images/portfolio:v2
+        image: asia-east1-docker.pkg.dev/gcp-gke-deploy/gke-images/portfolio:v3
         ports:
         - containerPort: 80
         # SRE 建議：加入資源限制，避免單一 Pod 消耗過多節點資源
