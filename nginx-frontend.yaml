@@ -1,13 +1,30 @@
+# --- 0. 建立 Namespace ---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nginx-frontend
+  labels:
+    istio-injection: enabled # 自動注入 Istio Sidecar
+---
 # --- 1. 部署程式碼 (Deployment) ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: portfolio-app
   namespace: nginx-frontend
+  # --- ArgoCD Image Updater 核心配置 ---
   annotations:
-    # 這是給 Image Updater 看的：告訴它「我是由 ArgoCD 託管的」
-    # 它會自動尋找關聯的 Application 並在發現新鏡像時更新此處
-    argocd-image-updater.argoproj.io/on-update: "refresh" 
+    # 1. 定義別名與監控路徑
+    argocd-image-updater.argoproj.io/image-list: my-portfolio=asia-east1-docker.pkg.dev/gcp-gke-deploy/gke-images/portfolio
+    
+    # 2. 針對 prod 固定標籤，必須使用 digest 策略 (內容變動即觸發)
+    argocd-image-updater.argoproj.io/my-portfolio.update-strategy: digest
+    
+    # 3. 指定拉取特定 tag (prod) 的最新內容
+    argocd-image-updater.argoproj.io/my-portfolio.allow-tags: regexp:^prod$
+    
+    # 4. 寫回方法：直接 Commit 回 GitHub
+    argocd-image-updater.argoproj.io/write-back-method: git
 spec:
   replicas: 2
   selector:
@@ -26,14 +43,40 @@ spec:
       containers:
       - name: portfolio-container
         image: asia-east1-docker.pkg.dev/gcp-gke-deploy/gke-images/portfolio:prod
-        # --- 關鍵修正：確保固定標籤也能正確觸發重新拉取 ---
+        # 重要：固定標籤必須設為 Always，否則 K8S 節點可能不會重新拉取
         imagePullPolicy: Always 
         ports:
         - containerPort: 80
-        resources:
-          requests:
-            cpu: "100m"
-            memory: "128Mi"
-          limits:
-            cpu: "200m"
-            memory: "256Mi"
+---
+# --- 2. 內部服務 (Service) ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portfolio-service
+  namespace: nginx-frontend
+spec:
+  selector:
+    app: portfolio
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 80
+---
+# --- 3. 虛擬服務 (VirtualService) ---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: portfolio-virtualservice
+  namespace: nginx-frontend
+spec:
+  hosts:
+  - "www.jacky3.com"
+  gateways:
+  - istio-system/monitoring-gateway
+  http:
+  - route:
+    - destination:
+        host: portfolio-service.nginx-frontend.svc.cluster.local 
+        port:
+          number: 80
